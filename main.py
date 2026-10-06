@@ -152,7 +152,6 @@ def init_db():
             row[1] for row in cursor.execute("PRAGMA table_info(records)")
         }
         if "chat_id" not in record_columns:
-            # Originating chats were never stored; do not invent them for old rows.
             cursor.execute("ALTER TABLE records ADD COLUMN chat_id INTEGER")
         if "product_qty" not in record_columns:
             cursor.execute("ALTER TABLE records ADD COLUMN product_qty REAL DEFAULT 0")
@@ -261,7 +260,6 @@ def accounting_period_key(created_at):
             datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S")
         ).strftime("%Y-%m-%d %H:%M:%S")
     except (TypeError, ValueError):
-        # Preserve legacy records without pretending an unknown timestamp is today.
         return "unknown"
 
 
@@ -306,7 +304,6 @@ def synchronize_deal_numbers(conn):
            FROM records WHERE type = 'deal' ORDER BY created_at, id"""
     ).fetchall()
     for record_id, chat, user, created_at, number, period in rows:
-        # Unassigned legacy records are private-only; never invent group ownership.
         owner = chat if chat is not None else user if user and user > 0 else None
         if not owner:
             continue
@@ -540,7 +537,6 @@ def clear_input_data(user_data):
 
 
 def invalidate_chat_inputs(context, chat_id):
-    """Invalidate all members' pending records in the reset chat, and no others."""
     application = getattr(context, "application", None)
     users = [context.chat_data, *getattr(application, "chat_data", {}).values(),
              context.user_data, *getattr(application, "user_data", {}).values()]
@@ -644,7 +640,6 @@ def format_writeoff(record, *, history=False):
 
 
 def split_record_note(text, kind):
-    """Separate a note from accounting input without interpreting its contents."""
     if kind not in {"deal", "expense", "advance"}:
         return text, ""
     accounting, separator, note = text.partition("\n")
@@ -653,8 +648,6 @@ def split_record_note(text, kind):
     if kind == "deal":
         prefix = DEAL_PREFIX_RE.match(accounting)
         if prefix:
-            # Consume only the accounting prefix. Everything after the first
-            # free-text word is a note, even if it contains more numbers.
             token = re.compile(
                 rf"\s*(?:[+-]?\d+(?:[.,]\d+)?|[€$/]|\bслабый\b|"
                 rf"(?:eur|евро|usd|грн|uah)(?!\w)|на\s+карту\b|"
@@ -676,7 +669,6 @@ async def create_record_preview(text, chat_id, context, editing_record_id=None):
     for key, record in list(records.items()):
         if now - record["created_at"] >= timedelta(minutes=30):
             records.pop(key)
-    # Keep multiple previews independent without retaining unbounded message text.
     while len(records) >= 20:
         records.pop(next(iter(records)))
     key = secrets.token_urlsafe(8)
@@ -849,7 +841,6 @@ def get_payment_type(text: str) -> str:
 
 
 def parse_deal_amounts(text: str, total_amount: float):
-    """Validate marked payments, including a stated total with partial card payment."""
     if not math.isfinite(total_amount) or total_amount <= 0:
         raise ValueError("Укажите положительную сумму сделки.")
     parsed = parse_amount(text)
@@ -972,7 +963,6 @@ def parse_purchase(text):
     if not math.isfinite(qty) or qty <= 0 or not math.isfinite(amount) or amount <= 0:
         raise ValueError("Количество и сумма покупки должны быть конечными положительными числами.")
     item = (match.group(6) or "товар").strip()
-    # A malformed money line must not become an item's description.
     lines = text.strip().splitlines()
     product_only = re.fullmatch(
         rf"-\s*\d+(?:[.,]\d+)?\s*({PRODUCT_UNITS})\s*", lines[0], re.IGNORECASE,
@@ -1004,7 +994,6 @@ CURRENCY_NAMES = {
 def parse_amount(text: str, allow_plain_number: bool = False):
     if not allow_plain_number and get_record_type(text) == "topup_product":
         return None
-    # A sale's price follows "за" or "="; its first number may be quantity.
     if not allow_plain_number:
         prefix = DEAL_PREFIX_RE.match(text)
         if prefix:
@@ -1050,7 +1039,6 @@ def parse_amount(text: str, allow_plain_number: bool = False):
 
 
 def parse_product_topups(text):
-    """Parse the whole input so unsupported trailing stock isn't silently lost."""
     text = re.sub(r"^\s*пополнить\s+", "", text, flags=re.IGNORECASE)
     chunks = re.split(r"\s*(?=\+\s*\d)", text.strip())
     products = {}
@@ -1073,7 +1061,6 @@ def parse_product_topups(text):
 
 
 def parse_mixed_payment(text, default_currency="€"):
-    """One sale, two payment amounts, one inventory deduction."""
     price_parts = re.split(r"\bза\b|=", text, maxsplit=1, flags=re.IGNORECASE)
     if len(price_parts) != 2:
         raise ValueError("Смешанная оплата: 1 за 50€/40💳.")
@@ -1372,7 +1359,6 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def history_page(chat_id, page_index, *, include_edit_buttons=False):
-    """Group all records by day and paginate within Telegram's message limit."""
     with db_connection() as conn:
         scope, params = ledger_scope(chat_id)
         rows = conn.execute(
@@ -1416,7 +1402,6 @@ def history_page(chat_id, page_index, *, include_edit_buttons=False):
                 f"{sign}{format_quantity(part)} {currency or '€'} {payment_icon(channel)}"
                 for channel, part in record_payments(kind, payment, amount, details).items()
             ))
-        # Keep the accounting line and show multiline notes below it.
         accounting, note = split_record_note(summary or "", kind)
         if summary:
             values.append(accounting[:1200] if note else summary[:2300])
@@ -1471,7 +1456,6 @@ def history_page(chat_id, page_index, *, include_edit_buttons=False):
 
 
 async def show_menu_section(text, user_id, chat_id, context, message=None):
-    """Use the same sections for both the reply keyboard and inline navigation."""
     async def respond(text, reply_markup=None, parse_mode=None):
         keyboard = reply_markup if reply_markup is not None else back_to_main_keyboard()
         if message is not None:
@@ -1886,11 +1870,9 @@ async def delete_record_preview(message, fallback_text):
     try:
         await message.delete()
     except Exception:
-        # A deletion can be refused by Telegram; remove the buttons either way.
         await message.edit_text(fallback_text, reply_markup=back_to_main_keyboard())
 
 def legacy_receipt_record_id(chat_id, message):
-    """Resolve old, unbound deal buttons only when their receipt identifies one record."""
     if getattr(message, "forward_origin", None):
         return None
     match = re.match(r"^✅ Сделка [№#](\d+)(?:\n|$)", getattr(message, "text", "") or "")
@@ -1905,7 +1887,6 @@ def legacy_receipt_record_id(chat_id, message):
         ).fetchall()
     confirmed_at = getattr(message, "edit_date", None)
     if confirmed_at:
-        # Stored timestamps use the server's local datetime, as does record creation.
         local_time = confirmed_at.astimezone().replace(tzinfo=None)
         period = accounting_period_key(local_time.strftime("%Y-%m-%d %H:%M:%S"))
         rows = [row for row in rows if row[1] == period]
@@ -1978,7 +1959,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         records = context.chat_data.get("pending_records", {})
         pending = records.get(key)
         if not pending:
-            # Without chat-scoped state we cannot verify this message.
             await query.message.reply_text(
                 "⚠️ Время подтверждения истекло или запись уже обработана. Отправьте запись снова.",
             )
@@ -2054,7 +2034,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pending["details"],
                 chat_id=chat_id,
             )
-        # No await between saving and consuming the preview: repeated clicks cannot save twice.
         records.pop(key)
         await query.message.edit_text(
             format_saved_record(pending, record_id),
@@ -2187,11 +2166,13 @@ def build_application() -> Application:
     return application
 
 
-@app.get("/")
+# Оновлені та універсальні маршрути Flask для фонового веб-сервера (health checks / пінгування)
+@app.route("/", methods=["GET"])
 def home():
-    return "Finance Bot service. Check /api/healthz for readiness.", 200
+    return "Finance Bot service is running and healthy.", 200
 
 
+@app.route("/healthz", methods=["GET"])
 @app.get("/api/healthz")
 def health():
     try:
