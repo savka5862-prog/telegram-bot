@@ -70,7 +70,8 @@ def connection(db_file=None):
                     deal_number TEXT,
                     accounting_period TEXT,
                     date TIMESTAMP,
-                    created_at TIMESTAMP
+                    created_at TIMESTAMP,
+                    type TEXT
                 );
                 
                 CREATE TABLE IF NOT EXISTS stock_topups (
@@ -86,6 +87,7 @@ def connection(db_file=None):
                 ALTER TABLE records ADD COLUMN IF NOT EXISTS deal_number TEXT;
                 ALTER TABLE records ADD COLUMN IF NOT EXISTS accounting_period TEXT;
                 ALTER TABLE records ADD COLUMN IF NOT EXISTS created_at TIMESTAMP;
+                ALTER TABLE records ADD COLUMN IF NOT EXISTS type TEXT;
             """)
         conn.commit()
         yield PostgresConnection(conn)
