@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import tempfile
+import time
 from contextlib import closing, contextmanager
 from pathlib import Path
 
@@ -116,11 +117,26 @@ def polling_lock(db_file=None):
 
     import psycopg
 
-    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
-        acquired = conn.execute("SELECT pg_try_advisory_lock(718941203)").fetchone()[0]
-        if not acquired:
-            raise RuntimeError("Another Finance Bot process already owns Telegram polling.")
+    acquired = False
+    # Робимо кілька спроб отримати лок з інтервалом у 5 секунд (загалом до 1 хвилини очікування)
+    for _ in range(12):
         try:
-            yield
-        finally:
-            conn.execute("SELECT pg_advisory_unlock(718941203)")
+            with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+                acquired = conn.execute("SELECT pg_try_advisory_lock(718941203)").fetchone()[0]
+                if acquired:
+                    break
+        except Exception:
+            pass
+        time.sleep(5)
+
+    if not acquired:
+        raise RuntimeError("Another Finance Bot process already owns Telegram polling.")
+
+    try:
+        yield
+    finally:
+        try:
+            with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+                conn.execute("SELECT pg_advisory_unlock(718941203)")
+        except Exception:
+            pass
