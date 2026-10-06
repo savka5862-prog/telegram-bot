@@ -1977,12 +1977,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending = records.get(key)
         if not pending:
             await query.message.reply_text(
-                "⚠️️ Время подтверждения истекло или запись уже обработана. Отправьте запись снова.",
+                "⚠ Время подтверждения истекло или запись уже обработана. Отправьте запись снова.",
             )
             return
         if pending and pending["chat_id"] != query.message.chat_id:
             await query.message.reply_text(
-                "⚠️️ Это подтверждение принадлежит другому чату."
+                "⚠ Это подтверждение принадлежит другому чату."
             )
             return
         if pending.get("message_id") is not None and pending["message_id"] != query.message.message_id:
