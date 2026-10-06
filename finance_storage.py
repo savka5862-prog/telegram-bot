@@ -72,6 +72,14 @@ def connection(db_file=None):
                     date TIMESTAMP
                 );
                 
+                CREATE TABLE IF NOT EXISTS stock_topups (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    chat_id BIGINT,
+                    amount REAL,
+                    date TIMESTAMP
+                );
+
                 ALTER TABLE records ADD COLUMN IF NOT EXISTS chat_id BIGINT;
                 ALTER TABLE records ADD COLUMN IF NOT EXISTS details TEXT;
                 ALTER TABLE records ADD COLUMN IF NOT EXISTS deal_number TEXT;
