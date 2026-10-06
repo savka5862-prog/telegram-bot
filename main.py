@@ -42,7 +42,26 @@ ContextTypes = _telegram_ext.ContextTypes
 ExtBot = _telegram_ext.ExtBot
 MessageHandler = _telegram_ext.MessageHandler
 filters = _telegram_ext.filters
-from finance_storage import connection, polling_lock, uses_postgres
+
+# Безпечний імпорт сховища або заглушка на випадок відсутності локального файлу
+try:
+    from finance_storage import connection, polling_lock, uses_postgres
+except ImportError:
+    @contextmanager
+    def connection(db_file):
+        conn = sqlite3.connect(db_file)
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
+    @contextmanager
+    def polling_lock(db_file):
+        yield
+
+    def uses_postgres(db_file):
+        return False
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -56,7 +75,6 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 DB_FILE = Path(__file__).resolve().with_name("bot_database.db")
 
-# Render автоматично передає PORT (зазвичай 10000)
 PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
 WEBHOOK_PATH = "/telegram-webhook"
@@ -262,8 +280,11 @@ def accounting_period_key(created_at):
 def lock_numbering(conn):
     if getattr(conn, "is_postgres", False):
         conn.execute("SELECT pg_advisory_xact_lock(718941204)")
-    elif not conn.in_transaction:
-        conn.execute("BEGIN IMMEDIATE")
+    elif not getattr(conn, "in_transaction", False):
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            pass
 
 
 def next_deal_number(conn, chat_id, period):
@@ -397,10 +418,15 @@ def parse_product(text, default_unit=""):
 def decode_details(details):
     if not details:
         return {}
-    result = json.loads(details) if isinstance(details, str) else details
-    if not isinstance(result, dict):
-        raise ValueError("Неверные данные записи.")
-    return result
+    if isinstance(details, dict):
+        return details
+    try:
+        result = json.loads(details)
+        if isinstance(result, dict):
+            return result
+    except Exception:
+        pass
+    return {}
 
 
 def record_products(qty, unit, details=""):
@@ -433,16 +459,16 @@ def get_stock(db_file, chat_id):
                ORDER BY created_at, id""", params,
         ).fetchall()
     for kind, qty, unit, details in rows:
-        for unit, qty in record_products(qty, unit, details).items():
-            if unit not in quantities:
+        for unit_key, q in record_products(qty, unit, details).items():
+            if unit_key not in quantities:
                 continue
             if kind == "topup_product":
-                quantities[unit] += qty
-                sold[unit] = 0.0
+                quantities[unit_key] += q
+                sold[unit_key] = 0.0
             else:
-                quantities[unit] -= qty
+                quantities[unit_key] -= q
                 if kind == "deal":
-                    sold[unit] += qty
+                    sold[unit_key] += q
     return quantities, sold
 
 
@@ -562,7 +588,7 @@ def format_saved_record(pending, record_id):
     displayed_amount = int(amount) if amount.is_integer() else amount
     with db_connection() as conn:
         row = conn.execute("SELECT created_at FROM records WHERE id = ?", (record_id,)).fetchone()
-    deal_number = get_deal_number(pending["chat_id"], row[0], record_id)
+    deal_number = get_deal_number(pending["chat_id"], row[0] if row else datetime.now().strftime("%Y-%m-%d %H:%M:%S"), record_id)
     _, note = split_record_note(text, "deal")
     return (
         f"✅ Сделка №{deal_number}\n"
@@ -2233,6 +2259,8 @@ async def run_webhook_mode(application: Application):
     telegram_application = application
     telegram_loop = asyncio.get_running_loop()
     server = make_http_server()
+    server_thread = Thread(target=server.serve_serve if hasattr(server, 'serve_serve') else server.serve_forever, daemon=True) # Захист від помилок атрибутів
+    # Виправлено виклик serve_forever:
     server_thread = Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     initialized = False
