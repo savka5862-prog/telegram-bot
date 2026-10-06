@@ -62,11 +62,20 @@ def connection(db_file=None):
                 CREATE TABLE IF NOT EXISTS records (
                     id SERIAL PRIMARY KEY,
                     user_id BIGINT,
+                    chat_id BIGINT,
                     amount REAL,
                     category TEXT,
                     comment TEXT,
+                    details TEXT,
+                    deal_number TEXT,
+                    accounting_period TEXT,
                     date TIMESTAMP
                 );
+                
+                ALTER TABLE records ADD COLUMN IF NOT EXISTS chat_id BIGINT;
+                ALTER TABLE records ADD COLUMN IF NOT EXISTS details TEXT;
+                ALTER TABLE records ADD COLUMN IF NOT EXISTS deal_number TEXT;
+                ALTER TABLE records ADD COLUMN IF NOT EXISTS accounting_period TEXT;
             """)
         conn.commit()
         yield PostgresConnection(conn)
