@@ -27,7 +27,7 @@ from werkzeug.serving import make_server
 from importlib import import_module
 
 # The module is supplied by python-telegram-bot, NOT the unrelated "telegram"
-# distribution. Dynamic imports avoid Replit's incorrect dependency inference.
+# distribution. Dynamic imports avoid dependency inference issues.
 _telegram = import_module("telegram")
 _telegram_ext = import_module("telegram.ext")
 InlineKeyboardButton = _telegram.InlineKeyboardButton
@@ -48,7 +48,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-# Bot API URLs include the token, so never print HTTP request URLs in workflow logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
@@ -56,7 +55,9 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 DB_FILE = Path(__file__).resolve().with_name("bot_database.db")
-PORT = int(os.getenv("PORT", "5000"))
+
+# Render автоматично передає PORT (зазвичай 10000)
+PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").rstrip("/")
 WEBHOOK_PATH = "/telegram-webhook"
 WEBHOOK_SECRET = secrets.token_urlsafe(32)
@@ -73,7 +74,6 @@ def bold_html(text, already_html=False):
         body = body.replace("<b>", "").replace("</b>", "")
     else:
         body = escape(body)
-    # Telegram code/pre entities cannot overlap bold entities.
     parts = re.split(r"(<code>.*?</code>|<pre>.*?</pre>)", body, flags=re.DOTALL)
     return "".join(
         part if part.startswith(("<code>", "<pre>")) else f"<b>{part}</b>"
@@ -110,14 +110,12 @@ class BoldHTMLBot(ExtBot):
 
 @contextmanager
 def db_connection(db_file=None):
-    """Commit/roll back transactions and always close their connections."""
     with connection(db_file or DB_FILE) as conn:
         yield conn
 
 
 def init_db():
     if uses_postgres(DB_FILE):
-        # Replit Publish manages production DDL. Never create/alter tables here.
         with db_connection() as conn:
             conn.execute("SELECT id, chat_id, details, deal_number, accounting_period FROM records LIMIT 0")
             conn.execute("SELECT id, chat_id FROM stock_topups LIMIT 0")
@@ -210,7 +208,6 @@ def init_db():
 
 
 def ledger_scope(chat_id):
-    """A shared chat ledger, with private-only access to unassigned legacy rows."""
     if not isinstance(chat_id, int) or chat_id == 0:
         raise ValueError("A valid Telegram chat ID is required.")
     if chat_id > 0:
@@ -241,7 +238,6 @@ def format_ru_date(dt):
     return f"{dt.day} {MONTHS_RU[dt.month]} {dt.year} г."
 
 def get_accounting_period_start(dt: datetime) -> datetime:
-    """Most recent daily boundary: weekdays at 02:00, weekends at 03:00."""
     boundary = dt.replace(
         hour=3 if dt.weekday() >= 5 else 2, minute=0, second=0, microsecond=0,
     )
@@ -264,7 +260,6 @@ def accounting_period_key(created_at):
 
 
 def lock_numbering(conn):
-    """Serialize numbering and the accompanying record write in one transaction."""
     if getattr(conn, "is_postgres", False):
         conn.execute("SELECT pg_advisory_xact_lock(718941204)")
     elif not conn.in_transaction:
@@ -297,7 +292,6 @@ def allocate_deal_number(conn, chat_id, period):
 
 
 def synchronize_deal_numbers(conn):
-    """Backfill old deals once, preserving saved numbers and all financial data."""
     lock_numbering(conn)
     rows = conn.execute(
         """SELECT id, chat_id, user_id, created_at, deal_number, accounting_period
@@ -326,7 +320,6 @@ def synchronize_deal_numbers(conn):
 
 
 def get_deal_number(chat_id, created_at_str, record_id=None):
-    """Read the stored entry number, never renumber saved deals after deletion."""
     scope, params = ledger_scope(chat_id)
     with db_connection() as conn:
         if record_id is not None:
@@ -355,7 +348,6 @@ def product_measure(unit):
 
 
 def record_edit_title(chat_id, record_id):
-    """Display the saved deal number, never the internal edit identifier."""
     with db_connection() as conn:
         scope, params = ledger_scope(chat_id)
         row = conn.execute(
@@ -367,7 +359,6 @@ def record_edit_title(chat_id, record_id):
 
 
 def get_preview_deal_number(chat_id, now, editing_record_id=None):
-    """Preview the next ordinal, or the existing position for a record edit."""
     if editing_record_id is not None:
         scope, params = ledger_scope(chat_id)
         with db_connection() as conn:
@@ -2166,7 +2157,6 @@ def build_application() -> Application:
     return application
 
 
-# Оновлені та універсальні маршрути Flask для фонового веб-сервера (health checks / пінгування)
 @app.route("/", methods=["GET"])
 def home():
     return "Finance Bot service is running and healthy.", 200
@@ -2181,7 +2171,7 @@ def health():
     except Exception as error:
         logger.warning("Database readiness failed (%s).", type(error).__name__)
         return {"status": "unavailable"}, 503
-    enabled = os.getenv("BOT_POLLING_ENABLED", "false").lower() == "true"
+    enabled = os.getenv("BOT_POLLING_ENABLED", "true").lower() == "true"
     if enabled and (telegram_application is None or not telegram_application.running):
         return {"status": "starting"}, 503
     return {"status": "ok", "telegram": "enabled" if enabled else "workspace-paused"}, 200
@@ -2277,12 +2267,13 @@ async def run_webhook_mode(application: Application):
 
 
 def main():
-    if os.getenv("BOT_POLLING_ENABLED", "false").lower() != "true":
-        logger.info("Workspace health server only; Telegram polling is reserved for publishing.")
+    # Для Render за замовчуванням увімкнено polling, якщо змінна не задана інакше
+    if os.getenv("BOT_POLLING_ENABLED", "true").lower() != "true":
+        logger.info("Workspace health server only; Telegram polling is reserved.")
         make_http_server().serve_forever()
         return
     if not TOKEN:
-        raise RuntimeError("Set TELEGRAM_TOKEN or TELEGRAM_BOT_TOKEN in Replit Secrets.")
+        raise RuntimeError("Set TELEGRAM_TOKEN or TELEGRAM_BOT_TOKEN in Render Environment Variables.")
 
     application = build_application()
     logger.info(
