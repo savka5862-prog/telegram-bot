@@ -1977,12 +1977,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending = records.get(key)
         if not pending:
             await query.message.reply_text(
-                "⚠️ Время подтверждения истекло или запись уже обработана. Отправьте запись снова.",
+                "⚠️️ Время подтверждения истекло или запись уже обработана. Отправьте запись снова.",
             )
             return
         if pending and pending["chat_id"] != query.message.chat_id:
             await query.message.reply_text(
-                "⚠️ Это подтверждение принадлежит другому чату."
+                "⚠️️ Это подтверждение принадлежит другому чату."
             )
             return
         if pending.get("message_id") is not None and pending["message_id"] != query.message.message_id:
@@ -2259,8 +2259,6 @@ async def run_webhook_mode(application: Application):
     telegram_application = application
     telegram_loop = asyncio.get_running_loop()
     server = make_http_server()
-    server_thread = Thread(target=server.serve_serve if hasattr(server, 'serve_serve') else server.serve_forever, daemon=True) # Захист від помилок атрибутів
-    # Виправлено виклик serve_forever:
     server_thread = Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     initialized = False
@@ -2317,4 +2315,4 @@ def main():
 init_db()
 
 if __name__ == "__main__":
-    main()
+        main()
