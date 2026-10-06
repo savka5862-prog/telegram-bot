@@ -56,7 +56,7 @@ def connection(db_file=None):
     if not url:
         raise RuntimeError("Persistent DATABASE_URL is required; SQLite fallback is disabled.")
             with psycopg.connect(url, connect_timeout=10) as conn:
-            with conn.cursor() as cur:
+                with conn.cursor() as cur:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS records (
                         id SERIAL PRIMARY KEY,
