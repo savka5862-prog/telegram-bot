@@ -2267,7 +2267,6 @@ async def run_webhook_mode(application: Application):
 
 
 def main():
-    # Для Render за замовчуванням увімкнено polling, якщо змінна не задана інакше
     if os.getenv("BOT_POLLING_ENABLED", "true").lower() != "true":
         logger.info("Workspace health server only; Telegram polling is reserved.")
         make_http_server().serve_forever()
