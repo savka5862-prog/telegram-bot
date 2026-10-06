@@ -55,8 +55,21 @@ def connection(db_file=None):
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("Persistent DATABASE_URL is required; SQLite fallback is disabled.")
-    with psycopg.connect(url, connect_timeout=10) as conn:
-        yield PostgresConnection(conn)
+            with psycopg.connect(url, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS records (
+                        id SERIAL PRIMARY KEY,
+                        user_id BIGINT,
+                        amount REAL,
+                        category TEXT,
+                        comment TEXT,
+                        date TIMESTAMP
+                    );
+                """)
+            conn.commit()
+            yield PostgresConnection(conn)
+
 
 
 @contextmanager
